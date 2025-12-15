@@ -39,7 +39,7 @@ def create_llm():
 
 def _get_source_from_github(source_file: str) -> str | None:
     """
-    Fetch source code from the configured GitHub repository.
+    Fetch source code from the configured GitHub repository via MCP.
     
     Args:
         source_file: Filename from the log (e.g., "translator.cpp")
@@ -47,58 +47,48 @@ def _get_source_from_github(source_file: str) -> str | None:
     Returns:
         Source code content or None if not found
     """
+    from ..utils.mcp_client import get_file_contents_sync
+    
     config = get_config()
     
     if not config.has_github_access:
         return None
     
+    # Parse owner/repo from config
     try:
-        from github import Github, GithubException
-        
-        gh = Github(config.github_token)
-        repo = gh.get_repo(config.github_repo)
-        
-        # Try different path patterns
-        possible_paths = [
-            f"src/{source_file}",           # src/translator.cpp
-            source_file,                     # translator.cpp
-            f"source/{source_file}",         # source/translator.cpp
-            f"include/{source_file}",        # include/translator.h
-        ]
-        
-        # Also handle truncated names (e.g., "translatormasterca" -> "translatormastercard.cpp")
-        base_name = source_file.replace('.cpp', '').replace('.h', '')
-        if not source_file.endswith(('.cpp', '.h')):
-            possible_paths.extend([
-                f"src/{base_name}.cpp",
-                f"src/{base_name}.h",
-            ])
-        
-        for path in possible_paths:
-            try:
-                content = repo.get_contents(path, ref=config.github_target_branch)
-                if content and hasattr(content, 'decoded_content'):
-                    print(f"📄 Loaded source from GitHub: {path}")
-                    return content.decoded_content.decode('utf-8')
-            except GithubException:
-                continue
-        
-        # Try searching in the repo for files matching the name
-        try:
-            contents = repo.get_contents("src", ref=config.github_target_branch)
-            for item in contents:
-                if item.type == "file" and base_name in item.name:
-                    content = repo.get_contents(item.path, ref=config.github_target_branch)
-                    print(f"📄 Loaded source from GitHub: {item.path}")
-                    return content.decoded_content.decode('utf-8')
-        except GithubException:
-            pass
-        
+        owner, repo = config.github_repo.split("/")
+    except ValueError:
+        print(f"⚠️ Invalid GITHUB_REPO format: {config.github_repo}")
         return None
-        
-    except Exception as e:
-        print(f"⚠️ Could not fetch from GitHub: {e}")
-        return None
+    
+    # Try different path patterns
+    possible_paths = [
+        f"src/{source_file}",           # src/translator.cpp
+        source_file,                     # translator.cpp
+        f"source/{source_file}",         # source/translator.cpp
+        f"include/{source_file}",        # include/translator.h
+    ]
+    
+    # Also handle truncated names (e.g., "translatormasterca" -> "translatormastercard.cpp")
+    base_name = source_file.replace('.cpp', '').replace('.h', '')
+    if not source_file.endswith(('.cpp', '.h')):
+        possible_paths.extend([
+            f"src/{base_name}.cpp",
+            f"src/{base_name}.h",
+        ])
+    
+    for path in possible_paths:
+        content = get_file_contents_sync(
+            owner=owner,
+            repo=repo,
+            path=path,
+            branch=config.github_target_branch
+        )
+        if content:
+            print(f"📄 Loaded source from GitHub via MCP: {path}")
+            return content
+    
+    return None
 
 
 def _get_source_code(source_file: str, source_dir: Path) -> str | None:
