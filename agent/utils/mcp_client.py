@@ -88,15 +88,21 @@ def get_file_contents_sync(owner: str, repo: str, path: str, branch: str = "main
         File contents as string, or None if not found
     """
     try:
-        result = asyncio.run(_call_tool_async(
-            "get_file_contents",
-            {
-                "owner": owner,
-                "repo": repo,
-                "path": path,
-                "branch": branch,
-            }
-        ))
+        # Create a new event loop for this call to avoid TaskGroup issues
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(_call_tool_async(
+                "get_file_contents",
+                {
+                    "owner": owner,
+                    "repo": repo,
+                    "path": path,
+                    "branch": branch,
+                }
+            ))
+        finally:
+            loop.close()
         
         # Extract content from result
         if isinstance(result, str):
@@ -108,7 +114,10 @@ def get_file_contents_sync(owner: str, repo: str, path: str, branch: str = "main
         return str(result) if result else None
         
     except Exception as e:
-        print(f"⚠️ MCP get_file_contents failed: {e}")
+        error_msg = str(e)
+        # Only show warning for non-404 errors
+        if "Not Found" not in error_msg and "404" not in error_msg:
+            print(f"⚠️ MCP get_file_contents failed: {e}")
         return None
 
 
