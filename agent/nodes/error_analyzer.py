@@ -37,18 +37,89 @@ def create_llm():
         )
 
 
-def _get_source_code(source_file: str, source_dir: Path) -> str | None:
+def _get_source_from_github(source_file: str) -> str | None:
     """
-    Load source code for the given file.
+    Fetch source code from the configured GitHub repository.
     
     Args:
         source_file: Filename from the log (e.g., "translator.cpp")
-        source_dir: Base directory for source files
     
     Returns:
         Source code content or None if not found
     """
-    # Try to find the file - it might be abbreviated in logs
+    config = get_config()
+    
+    if not config.has_github_access:
+        return None
+    
+    try:
+        from github import Github, GithubException
+        
+        gh = Github(config.github_token)
+        repo = gh.get_repo(config.github_repo)
+        
+        # Try different path patterns
+        possible_paths = [
+            f"src/{source_file}",           # src/translator.cpp
+            source_file,                     # translator.cpp
+            f"source/{source_file}",         # source/translator.cpp
+            f"include/{source_file}",        # include/translator.h
+        ]
+        
+        # Also handle truncated names (e.g., "translatormasterca" -> "translatormastercard.cpp")
+        base_name = source_file.replace('.cpp', '').replace('.h', '')
+        if not source_file.endswith(('.cpp', '.h')):
+            possible_paths.extend([
+                f"src/{base_name}.cpp",
+                f"src/{base_name}.h",
+            ])
+        
+        for path in possible_paths:
+            try:
+                content = repo.get_contents(path, ref=config.github_target_branch)
+                if content and hasattr(content, 'decoded_content'):
+                    print(f"📄 Loaded source from GitHub: {path}")
+                    return content.decoded_content.decode('utf-8')
+            except GithubException:
+                continue
+        
+        # Try searching in the repo for files matching the name
+        try:
+            contents = repo.get_contents("src", ref=config.github_target_branch)
+            for item in contents:
+                if item.type == "file" and base_name in item.name:
+                    content = repo.get_contents(item.path, ref=config.github_target_branch)
+                    print(f"📄 Loaded source from GitHub: {item.path}")
+                    return content.decoded_content.decode('utf-8')
+        except GithubException:
+            pass
+        
+        return None
+        
+    except Exception as e:
+        print(f"⚠️ Could not fetch from GitHub: {e}")
+        return None
+
+
+def _get_source_code(source_file: str, source_dir: Path) -> str | None:
+    """
+    Load source code for the given file.
+    
+    First tries to fetch from GitHub, then falls back to local filesystem.
+    
+    Args:
+        source_file: Filename from the log (e.g., "translator.cpp")
+        source_dir: Base directory for source files (fallback)
+    
+    Returns:
+        Source code content or None if not found
+    """
+    # Try GitHub first (if configured)
+    github_content = _get_source_from_github(source_file)
+    if github_content:
+        return github_content
+    
+    # Fallback to local filesystem
     possible_names = [
         source_file,
         source_file.replace('.cpp', ''),
@@ -63,9 +134,10 @@ def _get_source_code(source_file: str, source_dir: Path) -> str | None:
                 return file_path.read_text(encoding='utf-8', errors='replace')
         
         # Also check for partial matches (logs often truncate names)
-        for file in source_dir.glob('*'):
-            if file.is_file() and name in file.name:
-                return file.read_text(encoding='utf-8', errors='replace')
+        if source_dir.exists():
+            for file in source_dir.glob('*'):
+                if file.is_file() and name in file.name:
+                    return file.read_text(encoding='utf-8', errors='replace')
     
     return None
 

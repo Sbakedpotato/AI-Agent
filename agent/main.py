@@ -243,16 +243,25 @@ def run_interactive_analysis(
                         branch_name = f"fix/auto-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                         gh.create_branch(branch_name)
                         
+                        files_updated = 0
                         for change in fix.code_changes:
-                            file_path = repo_root / change.file_path
-                            if file_path.exists():
-                                new_content = apply_code_change(file_path, change)
+                            try:
+                                # Try to update file on GitHub (path is relative to repo root)
+                                new_content = change.new_code  # Use the LLM's suggested new code
                                 gh.update_file(
                                     file_path=change.file_path,
                                     new_content=new_content,
                                     branch=branch_name,
                                     commit_message=f"fix: {change.explanation}"
                                 )
+                                files_updated += 1
+                            except Exception as file_err:
+                                console.print(f"[yellow]⚠️ Could not update {change.file_path}: {file_err}[/yellow]")
+                        
+                        if files_updated == 0:
+                            console.print("[red]❌ No files were updated - cannot create PR[/red]")
+                            console.print("[dim]The file paths from the fix may not exist in the GitHub repo.[/dim]")
+                            continue
                         
                         pr_url = gh.create_pull_request(
                             title=fix.title,

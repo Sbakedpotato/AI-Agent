@@ -85,23 +85,40 @@ class GitHubIntegration:
         
         Returns:
             True if successful
+        
+        Raises:
+            GithubException: If file update fails
         """
+        # Normalize path separators
+        file_path = file_path.replace("\\", "/")
+        
+        # Remove leading ./ or / if present
+        if file_path.startswith("./"):
+            file_path = file_path[2:]
+        if file_path.startswith("/"):
+            file_path = file_path[1:]
+        
         try:
             # Get current file to get its SHA
             contents = self.repo.get_contents(file_path, ref=branch)
             
             # Update the file
-            self.repo.update_file(
+            result = self.repo.update_file(
                 path=file_path,
                 message=commit_message,
                 content=new_content,
                 sha=contents.sha,
                 branch=branch
             )
+            print(f"✅ Updated {file_path} on branch {branch}")
             return True
         except GithubException as e:
-            print(f"Error updating file {file_path}: {e}")
-            return False
+            if e.status == 404:
+                print(f"❌ File not found in repo: {file_path}")
+                print(f"   Make sure the file path matches the repo structure")
+            else:
+                print(f"❌ Error updating file {file_path}: {e}")
+            raise  # Re-raise so caller knows update failed
     
     def create_pull_request(
         self,
