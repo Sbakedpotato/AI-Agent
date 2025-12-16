@@ -22,7 +22,22 @@ ANALYZER_SYSTEM_PROMPT = """You are an expert C++ developer and log analyst. You
    - CODE issue: Requires modifying C++ source files
    - CONFIG/DATA issue: Requires adding configuration or data records
 
-   **IMPORTANT HEURISTICS for distinguishing CONFIG vs CODE issues:**
+   **IMPORTANT: How to determine is_code_issue:**
+   
+   Set `is_code_issue = true` if the fix involves:
+   - Adding or modifying any C++ code (.cpp or .h files)
+   - Adding logging statements or debug output
+   - Adding null checks, validation, or error handling
+   - Fixing logic errors or changing control flow
+   - Modifying function implementations
+   
+   Set `is_code_issue = false` ONLY if the fix involves:
+   - Adding a configuration key/value (no code changes)
+   - Inserting a database record
+   - Adding a cache entry
+   - Modifying an external config file (not C++ source)
+
+   **HEURISTICS for distinguishing CONFIG vs CODE issues:**
    
    - If error shows "max length = 0" or "maxLength [0]" → This is likely MISSING_CONFIG, not code_bug
      The code is working correctly; the configuration for maximum field length was never set.
@@ -39,6 +54,9 @@ ANALYZER_SYSTEM_PROMPT = """You are an expert C++ developer and log analyst. You
 
    - Validation errors with sensible values failing (e.g., length 20 > max 0) → CONFIG issue
    - Validation errors with nonsensical values (e.g., negative length) → CODE bug
+   
+   - "Condition unmatched" with unclear cause → CODE issue (add logging to debug)
+   - Need more debugging info → CODE issue (add logging statements)
 
 3. **Root cause analysis**: What specifically is causing this error?
 

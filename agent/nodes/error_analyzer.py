@@ -91,11 +91,91 @@ def _get_source_from_github(source_file: str) -> str | None:
     return None
 
 
+def _parse_includes(source_code: str) -> list[str]:
+    """
+    Parse #include statements from C++ source code.
+    
+    Args:
+        source_code: C++ source code content
+    
+    Returns:
+        List of included file names (without path, just filename)
+    """
+    import re
+    
+    includes = []
+    
+    # Match both #include "file.h" and #include <file.h>
+    # We focus on local includes ("") as they're more likely to be in the repo
+    patterns = [
+        r'#include\s*"([^"]+)"',  # #include "file.h"
+        r'#include\s*<([^>]+)>',  # #include <file.h> (less likely to be local)
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, source_code)
+        for match in matches:
+            # Extract just the filename, not the path
+            filename = match.split('/')[-1]
+            if filename not in includes:
+                includes.append(filename)
+    
+    return includes
+
+
+def _get_source_with_includes(source_file: str, max_includes: int = 5) -> str | None:
+    """
+    Fetch source code along with its included files for better context.
+    
+    Args:
+        source_file: Main source file from the log
+        max_includes: Maximum number of included files to fetch (to limit API calls)
+    
+    Returns:
+        Combined source code with main file and includes, or None if not found
+    """
+    # Get the main source file
+    main_content = _get_source_from_github(source_file)
+    
+    if not main_content:
+        return None
+    
+    # Parse includes from the main file
+    includes = _parse_includes(main_content)
+    
+    if not includes:
+        return main_content
+    
+    # Build combined content with main file first
+    combined_parts = [
+        f"// ===== MAIN FILE: {source_file} =====",
+        main_content,
+    ]
+    
+    # Fetch included files (limit to prevent too many API calls)
+    fetched_count = 0
+    for include_file in includes[:max_includes]:
+        # Skip system headers (likely not in repo)
+        if include_file.startswith(('std', 'cstd', 'iostream', 'string', 'vector', 'map')):
+            continue
+        
+        include_content = _get_source_from_github(include_file)
+        if include_content:
+            combined_parts.append(f"\n\n// ===== INCLUDED FILE: {include_file} =====")
+            combined_parts.append(include_content)
+            fetched_count += 1
+    
+    if fetched_count > 0:
+        print(f"📎 Also loaded {fetched_count} included file(s)")
+    
+    return "\n".join(combined_parts)
+
+
 def _get_source_code(source_file: str, source_dir: Path) -> str | None:
     """
     Load source code for the given file.
     
-    First tries to fetch from GitHub, then falls back to local filesystem.
+    First tries to fetch from GitHub (with includes), then falls back to local filesystem.
     
     Args:
         source_file: Filename from the log (e.g., "translator.cpp")
@@ -104,12 +184,12 @@ def _get_source_code(source_file: str, source_dir: Path) -> str | None:
     Returns:
         Source code content or None if not found
     """
-    # Try GitHub first (if configured)
-    github_content = _get_source_from_github(source_file)
+    # Try GitHub first with includes (if configured)
+    github_content = _get_source_with_includes(source_file)
     if github_content:
         return github_content
     
-    # Fallback to local filesystem
+    # Fallback to local filesystem (no include parsing for local files)
     possible_names = [
         source_file,
         source_file.replace('.cpp', ''),
